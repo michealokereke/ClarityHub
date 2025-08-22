@@ -1,13 +1,26 @@
-import { model, Schema, Document } from "mongoose";
+import { model, Schema, Document, Types } from "mongoose";
 import { comparePassword, hashPassword } from "../utils/bycrpt";
 
-export interface IUser extends Document {
-  _id: string;
+interface ProfileSchema {
   name: string;
+  title: string;
+  phone: string;
+  avatarUrl: string;
+  location: string;
+  bio: string;
+}
+
+export interface IUser extends Document {
+  _id: Types.ObjectId;
+
   email: string;
   password: string;
-  role: string;
-  invitedby: Schema.Types.ObjectId;
+  role: "agencyAdmin" | "freelancer" | "client" | "readOnly";
+  status: "active" | "invited" | "disabled";
+  lastLoginAt: Date;
+  tenantId: Schema.Types.ObjectId;
+  updatedAt: Date;
+  profile: ProfileSchema;
 
   comparePassword(password: string): Promise<boolean>;
   deletePassword(): object;
@@ -15,23 +28,55 @@ export interface IUser extends Document {
 
 const userSchema = new Schema<IUser>(
   {
-    name: { type: String, required: true },
-    email: { type: String, unique: true, required: true, index: true },
+    email: {
+      type: String,
+      required: true,
+      unique: true,
+      lowercase: true,
+      trim: true,
+    },
     password: { type: String, required: true },
+
+    tenantId: {
+      type: Schema.Types.ObjectId,
+      required: true,
+      ref: "Tenant",
+      index: true,
+    },
+
+    profile: {
+      name: { type: String, required: true },
+      title: { type: String },
+      phone: { type: String },
+      avatarUrl: { type: String },
+      location: { type: String },
+      bio: { type: String },
+    },
     role: {
       type: String,
-      enum: ["freelancer", "client"],
+      enum: ["freelancer", "client", "agencyAdmin", "readOnly"],
       default: "freelancer",
     },
-    invitedby: { type: Schema.Types.ObjectId, ref: "User", default: null },
+
+    lastLoginAt: {
+      type: Date,
+    },
+
+    status: {
+      type: String,
+      required: true,
+      enum: ["active", "invited", "disabled"],
+      default: "active",
+    },
   },
   { timestamps: true }
 );
 
+userSchema.index({ tenantId: 1, role: 1 });
+
 userSchema.pre("save", async function (next) {
-  if (!this.isModified("password")) {
-    next();
-  }
+  if (!this.isModified("password")) return next();
+
   this.password = await hashPassword(this.password, 12);
   next();
 });

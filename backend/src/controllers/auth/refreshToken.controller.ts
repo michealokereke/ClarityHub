@@ -1,44 +1,68 @@
 import { RequestHandler } from "express";
-import { refreshTokenReq } from "../../middleware/refreshValidator.middleware";
 import { errorFormat } from "../../utils/errorFormat";
-import { BAD_REQUEST, NOT_FOUND } from "../../utils/getEnv";
+import { BAD_REQUEST, NOT_FOUND, UNAUTHORIZED } from "../../utils/getEnv";
 import { setCookies } from "../../utils/setCookies";
-import { signAccessToken, verifyRefreshToken } from "../../utils/jwt";
-import { findById } from "../../services/userExists.service";
+import {
+  signAccessToken,
+  signRefreshToken,
+  verifyRefreshToken,
+} from "../../utils/jwt";
+import { findById } from "../../services/userModel.service";
+import { findRefreshFamilyToken } from "../../services/tokenFamily.service";
+import { getuuidv4 } from "../../utils/uuidv4";
+import { authExtractorType } from "../../middleware/authExtractor.middleware";
 
 const refreshTokenController: RequestHandler = async (
-  req: refreshTokenReq,
+  req: authExtractorType,
   res,
   next
 ) => {
-  if (!req.refreshTokenDoc)
-    throw errorFormat("refresh token missing", BAD_REQUEST);
+  const reqRefreshToken = req.cookies.ch_refresh;
+  if (!reqRefreshToken) throw errorFormat("No Token", BAD_REQUEST);
+  const verifiedReqRefreshToken = verifyRefreshToken(reqRefreshToken);
+  if (!verifiedReqRefreshToken || typeof verifiedReqRefreshToken === "string")
+    throw errorFormat("Invalid or expired token", BAD_REQUEST);
 
-  const refreshTokenDoc = req.refreshTokenDoc;
-  const userAgent = req.headers["user-agent"];
-  const reqRefrshTokenToken = req.cookies.ch_refresh;
+  console.log(verifiedReqRefreshToken);
 
-  if (!reqRefrshTokenToken)
-    throw errorFormat("missing refresh token", BAD_REQUEST);
-  if (refreshTokenDoc.revoked) throw errorFormat("Token revoked", BAD_REQUEST);
-  if (refreshTokenDoc.fingerPrint !== userAgent)
-    throw errorFormat("invalid fingerPrint", BAD_REQUEST);
+  const refreshTokenFamily = await findRefreshFamilyToken({
+    userId: verifiedReqRefreshToken.userId,
+    familyId: verifiedReqRefreshToken.familyId,
+  });
 
-  const decoded = verifyRefreshToken(reqRefrshTokenToken);
+  if (!refreshTokenFamily) throw errorFormat("no tokenFamily found", NOT_FOUND);
 
-  if (!decoded || typeof decoded === "string")
-    throw errorFormat("Invalid Token in verify", BAD_REQUEST);
+  if (refreshTokenFamily.currentTokenId !== verifiedReqRefreshToken.jti) {
+    refreshTokenFamily.revokedAt = new Date();
+    await refreshTokenFamily.save();
+    throw errorFormat("reuse detected", BAD_REQUEST);
+  }
 
-  const user = await findById(decoded.userId);
+  if (refreshTokenFamily.revokedAt)
+    throw errorFormat("token expired", BAD_REQUEST);
+
+  const tokenId = getuuidv4();
+  refreshTokenFamily.currentTokenId = tokenId;
+  await refreshTokenFamily.save();
+
+  const refreshToken = signRefreshToken({
+    jti: refreshTokenFamily.currentTokenId,
+    familyId: refreshTokenFamily.familyId,
+    userId: refreshTokenFamily.userId,
+  });
+
+  const user = await findById(refreshTokenFamily.userId);
 
   if (!user) throw errorFormat("user not found", NOT_FOUND);
 
   const token = signAccessToken({
     userId: user._id.toString(),
+    tenantId: user.tenantId.toString(),
     role: user.role,
   });
 
-  setCookies(res, "ch_access", token, 15 * 60 * 1000, "/api/auth/accessToken");
+  setCookies(res, "ch_access", token, 15 * 60 * 1000);
+  setCookies(res, "ch_refresh", refreshToken, 30 * 24 * 60 * 60 * 1000);
 
   res.json({ message: "new access token created" });
 };

@@ -5,8 +5,7 @@ export const setCookies = (
   res: Response,
   name: string,
   token: string,
-  expires: number,
-  path: string
+  expires: number
 ) => {
   res.cookie(name, token, {
     maxAge: expires,
@@ -17,7 +16,7 @@ export const setCookies = (
   });
 };
 
-export const clearCookie = (res: Response, name: string, path: string) => {
+export const clearCookie = (res: Response, name: string) => {
   res.clearCookie(name, {
     path: "/",
     httpOnly: true,

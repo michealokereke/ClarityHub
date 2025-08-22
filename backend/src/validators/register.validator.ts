@@ -1,15 +1,14 @@
-import z, { email, string } from "zod";
+import { z } from "zod";
 
 export const registerSchema = z
   .object({
     name: z.string().min(2).max(80),
-    email: z.string().email(),
+    email: z.string().email().trim().lowercase(),
     password: z.string().min(8).max(25),
-    company: z.string().optional(),
     confirmPassword: z.string().min(8).max(25),
-    plan: z.string().optional(),
+    workspaceName: z.string().optional(),
   })
   .refine((data) => data.password === data.confirmPassword, {
-    path: ["confirmpassword"],
-    message: "password not matching",
+    path: ["confirmPassword"],
+    message: "Passwords do not match",
   });

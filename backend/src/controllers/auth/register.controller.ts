@@ -1,51 +1,75 @@
 import { RequestHandler } from "express";
-import { userExist } from "../../services/userExists.service";
+import {
+  userExist,
+  createUser,
+  userDocTypes,
+  userStatus,
+} from "../../services/userModel.service";
 import { BAD_REQUEST, CREATED } from "../../utils/getEnv";
 import { errorFormat } from "../../utils/errorFormat";
-import { createUser } from "../../services/createUser.service";
 import { signAccessToken, signRefreshToken } from "../../utils/jwt";
 import { setCookies } from "../../utils/setCookies";
 import { storeToken } from "../../services/storeToken.service";
+import { createWorkSpace } from "../../services/tenantModel.service";
+import {
+  createRefreshTokenFamily,
+  refreshTokenFamilyType,
+} from "../../services/tokenFamily.service";
+import { sha256 } from "../../utils/sha256";
+import { getuuidv4 } from "../../utils/uuidv4";
 
 const registerController: RequestHandler = async (req, res, next) => {
-  const { email } = req.body;
-  const userAgent = req.headers["user-agent"];
-  if (!userAgent) throw errorFormat("no user agent");
+  const { email, workspaceName, password, name } = req.body;
+
+  let spaceName = workspaceName;
 
   const isUserExist = await userExist(email);
-
   if (isUserExist) throw errorFormat("user already exists", BAD_REQUEST);
-  const newUser = await createUser(req.body);
 
+  if (!workspaceName) {
+    spaceName = `${name} Workspace`;
+  }
+
+  const TenantWorkspace = await createWorkSpace(spaceName);
+
+  const tenantId = TenantWorkspace._id;
+
+  const userDocs: userDocTypes = {
+    email,
+    password,
+    profile: { name },
+    tenantId,
+    status: userStatus.ACTIVE,
+  };
+
+  const newUser = await createUser(userDocs);
+
+  const tokenFamilyDocs: refreshTokenFamilyType = {
+    tenantId,
+    userId: newUser._id,
+    familyId: getuuidv4(),
+    currentTokenId: getuuidv4(),
+  };
+
+  const refreshTokenFamily = await createRefreshTokenFamily(tokenFamilyDocs);
   const token = signAccessToken({
     userId: newUser._id.toString(),
+    tenantId: tenantId.toString(),
     role: newUser.role,
   });
 
   const refreshToken = signRefreshToken({
-    userId: newUser._id.toString(),
-    role: newUser.role,
-    email: newUser.email,
+    jti: tokenFamilyDocs.currentTokenId,
+    familyId: tokenFamilyDocs.familyId,
+    userId: tokenFamilyDocs.userId,
   });
 
-  const storedRefreshToken = await storeToken(
-    newUser._id,
-    refreshToken,
-    userAgent
-  );
-
-  setCookies(res, "ch_access", token, 15 * 60 * 1000, "/api/auth/accessToken");
-  setCookies(
-    res,
-    "ch_refresh",
-    refreshToken,
-    24 * 60 * 60 * 1000,
-    "/api/auth/refreshToken"
-  );
+  setCookies(res, "ch_access", token, 15 * 60 * 1000);
+  setCookies(res, "ch_refresh", refreshToken, 24 * 60 * 60 * 1000);
 
   const userReturned = newUser.deletePassword();
 
-  res.status(CREATED).json({ user: userReturned, token: storedRefreshToken });
+  res.status(CREATED).json({ user: userReturned });
 };
 
 export default registerController;

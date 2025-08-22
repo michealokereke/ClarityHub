@@ -26,6 +26,8 @@ export const CLOUDINARY_CLOUD_NAME = getEnv("CLOUDINARY_CLOUD_NAME");
 export const CLOUDINARY_API_KEY = getEnv("CLOUDINARY_API_KEY");
 export const CLOUDINARY_API_SECRET = getEnv("CLOUDINARY_API_SECRET");
 export const NODE_ENV = getEnv("NODE_ENV", "development");
+export const SENDGRID_API_KEY = getEnv("SENDGRID_API_KEY");
+export const SENDGRID_EMAIL = getEnv("SENDGRID_EMAIL");
 
 export const OK = numberEnv("OK", 200);
 export const CREATED = numberEnv("CREATED", 201);

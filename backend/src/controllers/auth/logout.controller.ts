@@ -1,25 +1,32 @@
 import { RequestHandler } from "express";
-import { refreshTokenReq } from "../../middleware/refreshValidator.middleware";
-import { errorFormat } from "../../utils/errorFormat";
-import { BAD_REQUEST } from "../../utils/getEnv";
 import { clearCookie } from "../../utils/setCookies";
+import { verifyRefreshToken } from "../../utils/jwt";
+import { findRefreshFamilyToken } from "../../services/tokenFamily.service";
 
-const logoutController: RequestHandler = async (
-  req: refreshTokenReq,
-  res,
-  next
-) => {
-  if (!req.refreshTokenDoc)
-    throw errorFormat("refresh token missing", BAD_REQUEST);
+const logoutController: RequestHandler = async (req, res, next) => {
+  try {
+    const reqRefreshToken = req.cookies.ch_refresh;
+    const verifiedReqRefreshToken = verifyRefreshToken(reqRefreshToken);
 
-  const refreshTokenDoc = req.refreshTokenDoc;
-  refreshTokenDoc.revoked = true;
-  await refreshTokenDoc.save();
+    if (
+      verifiedReqRefreshToken &&
+      typeof verifiedReqRefreshToken !== "string"
+    ) {
+      const refreshTokenFamily = await findRefreshFamilyToken({
+        userId: verifiedReqRefreshToken.userId,
+        familyId: verifiedReqRefreshToken.familyId,
+      });
+      if (refreshTokenFamily) {
+        refreshTokenFamily.revokedAt = new Date();
+        await refreshTokenFamily.save();
+      }
+    }
+  } catch (error) {}
 
-  clearCookie(res, "ch_refresh", "/api/auth/refreshToken");
-  clearCookie(res, "ch_access", "/api/auth/accessToken");
+  clearCookie(res, "ch_refresh");
+  clearCookie(res, "ch_access");
 
-  res.json({ message: "user logout successfully", refreshTokenDoc });
+  res.json({ message: "user logout successfully" });
 };
 
 export default logoutController;

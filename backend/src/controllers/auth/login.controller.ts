@@ -1,49 +1,67 @@
 import { RequestHandler } from "express";
-import { findOne } from "../../services/userExists.service";
+import { findOne } from "../../services/userModel.service";
 import { errorFormat } from "../../utils/errorFormat";
-import { BAD_REQUEST, NOT_FOUND } from "../../utils/getEnv";
+import { BAD_REQUEST, NOT_FOUND, OK } from "../../utils/getEnv";
 import { signAccessToken, signRefreshToken } from "../../utils/jwt";
 import { setCookies } from "../../utils/setCookies";
-import { storeToken } from "../../services/storeToken.service";
+import { getuuidv4 } from "../../utils/uuidv4";
+import {
+  createRefreshTokenFamily,
+  findRefreshTokenFamilyByUserId,
+  refreshTokenFamilyType,
+} from "../../services/tokenFamily.service";
 
 const loginController: RequestHandler = async (req, res, next) => {
   const { email, password } = req.body;
   const user = await findOne(email);
-  const userAgent = req.headers["user-agent"];
-  if (!userAgent) throw errorFormat("no user agent");
 
-  if (!user) throw errorFormat("user not found", NOT_FOUND);
+  if (!user) throw errorFormat("invalid credentials", NOT_FOUND);
 
   const valid = await user.comparePassword(password);
   if (!valid) throw errorFormat("wrong credential", BAD_REQUEST);
+  if (user.status !== "active")
+    throw errorFormat("not active user", BAD_REQUEST);
+
+  let refreshTokenFamily = await findRefreshTokenFamilyByUserId(user._id);
+
+  if (!refreshTokenFamily)
+    throw errorFormat("no refresh Token Family seen", NOT_FOUND);
+
+  if (refreshTokenFamily.revokedAt) {
+    const tokenFamilyDocs: refreshTokenFamilyType = {
+      tenantId: user.tenantId.toString(),
+      userId: user._id,
+      familyId: getuuidv4(),
+      currentTokenId: getuuidv4(),
+    };
+
+    refreshTokenFamily = await createRefreshTokenFamily(tokenFamilyDocs);
+  } else {
+    const tokenId = getuuidv4();
+    refreshTokenFamily.currentTokenId = tokenId;
+    await refreshTokenFamily.save();
+  }
 
   const token = signAccessToken({
     userId: user._id.toString(),
+    tenantId: user.tenantId.toString(),
     role: user.role,
   });
 
   const refreshToken = signRefreshToken({
-    userId: user._id.toString(),
-    role: user.role,
-    email: user.email,
+    jti: refreshTokenFamily.currentTokenId,
+    familyId: refreshTokenFamily.familyId,
+    userId: refreshTokenFamily.userId,
   });
 
-  const storedRefreshToken = await storeToken(
-    user._id,
-    refreshToken,
-    userAgent
-  );
+  setCookies(res, "ch_access", token, 15 * 60 * 1000);
+  setCookies(res, "ch_refresh", refreshToken, 30 * 24 * 60 * 60 * 1000);
 
-  setCookies(res, "ch_access", token, 15 * 60 * 1000, "/api/auth/accessToken");
-  setCookies(
-    res,
-    "ch_refresh",
-    refreshToken,
-    24 * 60 * 60 * 1000,
-    "/api/auth/refreshToken"
-  );
+  user.lastLoginAt = new Date();
+
+  await user.save();
   const userReturned = user.deletePassword();
-  res.json(userReturned);
+  res.status(OK).json({ user: userReturned });
 };
 
 export default loginController;

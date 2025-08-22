@@ -7,6 +7,8 @@ import errorMiddleaware from "./middleware/error.middleware";
 import authRouter from "./routes/auth.route";
 import { errorFormat } from "./utils/errorFormat";
 import rateLimit from "express-rate-limit";
+import { authExtractor } from "./middleware/authExtractor.middleware";
+import clientRouter from "./routes/client.route";
 
 const app = express();
 app.use(cookieParser());
@@ -18,11 +20,13 @@ app.use(
     credentials: true,
   })
 );
+app.use(authExtractor);
 
-const authRateLimit = rateLimit({ windowMs: 60 * 1000, max: 5 });
+// const authRateLimit = rateLimit({ windowMs: 60 * 1000, max: 5 });
 
-app.use("/api/auth/", authRateLimit);
-app.use("/api/auth/", authRouter);
+// app.use("/api/v1/auth/", authRateLimit);
+app.use("/api/v1/auth", authRouter);
+app.use("/api/v1/clients", clientRouter);
 
 app.get("/", (req, res) => {
   // throw errorFormat("works but not yet", BAD_REQUEST);
